@@ -2,15 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"banksalad-backend-task/internal/domain"
 )
-
-type NotificationService interface {
-	SendNotifications(ctx context.Context, users []*domain.User) error
-}
 
 type NotificationManager struct {
 	emailService EmailService
@@ -18,50 +13,51 @@ type NotificationManager struct {
 }
 
 func NewNotificationManager() *NotificationManager {
-	emailService := NewEmailService()
-	smsService := NewSMSService()
-
 	return &NotificationManager{
-		emailService: emailService,
-		smsService:   smsService,
+		emailService: NewEmailService(),
+		smsService:   NewSMSService(),
 	}
 }
 
-func (nm *NotificationManager) SendNotifications(ctx context.Context, users []*domain.User) error {
+func (nm *NotificationManager) SendNotifications(ctx context.Context, users []*domain.User) (int, int, error) {
 	if len(users) == 0 {
-		return nil
+		return 0, 0, nil
 	}
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, 2)
+	var emailSuccess, smsSuccess int
+	var emailErr, smsErr error
 
-	// 이메일 알림 병렬 전송
+	// 이메일 전송
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := nm.emailService.SendEmails(ctx, users); err != nil {
-			errChan <- fmt.Errorf("이메일 알림 전송 실패: %w", err)
-		}
+		emailSuccess, emailErr = nm.emailService.SendEmails(ctx, users)
 	}()
 
-	// SMS 알림 속도 제한 전송
+	// SMS 전송
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := nm.smsService.SendSMS(ctx, users); err != nil {
-			errChan <- fmt.Errorf("SMS 알림 전송 실패: %w", err)
-		}
+		smsSuccess, smsErr = nm.smsService.SendSMS(ctx, users)
 	}()
 
 	wg.Wait()
-	close(errChan)
 
-	// 에러 확인
-	for err := range errChan {
-		if err != nil {
-			return err
-		}
+	// 에러가 있으면 첫 번째 에러 반환
+	if emailErr != nil {
+		return emailSuccess, smsSuccess, emailErr
+	}
+	if smsErr != nil {
+		return emailSuccess, smsSuccess, smsErr
 	}
 
+	return emailSuccess, smsSuccess, nil
+}
+
+func (nm *NotificationManager) Close() error {
+	if nm.smsService != nil {
+		nm.smsService.Stop()
+	}
 	return nil
 }
