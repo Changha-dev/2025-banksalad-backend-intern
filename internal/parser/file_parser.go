@@ -3,17 +3,13 @@ package parser
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"os"
 	"strings"
 
-	"banksalad-backend-task/internal/domain"
-)
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
-const (
-	emailFieldWidth  = 50
-	phoneFieldWidth  = 15
-	creditFieldWidth = 1
+	"banksalad-backend-task/internal/domain"
 )
 
 type FileParser struct {
@@ -30,15 +26,16 @@ func (fp *FileParser) ParseUsers(ctx context.Context) ([]*domain.User, error) {
 	// Given: 파일 열기
 	file, err := os.Open(fp.filePath)
 	if err != nil {
-		return nil, fmt.Errorf("파일을 열 수 없습니다 %s: %w", fp.filePath, err)
+		return nil, errors.Wrap(err, "파일을 열 수 없습니다")
 	}
+
 	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			// 파일 닫기 에러는 로그만 남기고 반환하지 않음
+		if err := file.Close(); err != nil {
+			log.WithError(err).Error("failed to close file")
 		}
 	}()
 
-	var users []*domain.User
+	users := make([]*domain.User, 0, 8000)
 	scanner := bufio.NewScanner(file)
 	lineNumber := 0
 
@@ -61,7 +58,7 @@ func (fp *FileParser) ParseUsers(ctx context.Context) ([]*domain.User, error) {
 
 		user, err := fp.parseLine(line)
 		if err != nil {
-			return nil, fmt.Errorf("%d번째 라인 파싱 오류: %w", lineNumber, err)
+			return nil, errors.Wrapf(err, "%d번째 라인 파싱 오류", lineNumber)
 		}
 
 		users = append(users, user)
@@ -69,27 +66,29 @@ func (fp *FileParser) ParseUsers(ctx context.Context) ([]*domain.User, error) {
 
 	// Then: 스캔 에러 확인
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("파일 읽기 오류: %w", err)
+		return nil, errors.Wrap(err, "파일 읽기 오류")
 	}
 
 	return users, nil
 }
 
 func (fp *FileParser) parseLine(line string) (*domain.User, error) {
-	expectedLength := emailFieldWidth + phoneFieldWidth + creditFieldWidth
-	if len(line) < expectedLength {
-		return nil, fmt.Errorf("라인 길이가 부족합니다: 최소 %d자 필요, 실제 %d자",
-			expectedLength, len(line))
+	// 공백을 기준으로 필드 분리
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return nil, errors.New("필드가 부족합니다: 최소 3개 필요")
 	}
 
-	// Given: 필드 추출
-	email := strings.TrimSpace(line[:emailFieldWidth])
-	phoneNumber := strings.TrimSpace(line[emailFieldWidth : emailFieldWidth+phoneFieldWidth])
-	creditUpStr := strings.TrimSpace(string(line[len(line)-1])) // 마지막 문자 추출
+	email := fields[0]
+	phoneNumber := fields[1]
+	creditUpStr := fields[2]
 
-	// When: 신용점수 상승 여부 판단
 	creditUp := creditUpStr == "Y"
 
-	// Then: User 객체 생성 및 반환
-	return domain.NewUser(email, phoneNumber, creditUp)
+	user, err := domain.NewUser(email, phoneNumber, creditUp)
+	if err != nil {
+		return nil, errors.Wrap(err, "사용자 객체 생성 실패")
+	}
+
+	return user, nil
 }
