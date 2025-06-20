@@ -6,15 +6,7 @@
 
 ## 실행 방법
 
-1. 프로젝트 설정  
-``` go mod tidy ```
-
-2. 프로그램 실행  
 ``` go run cmd/main.go ```
-
-3. 결과 확인  
-``` cat files/output/notified_emails.txt ```  
-``` cat files/output/notified_phone_numbers.txt ```
 
 ## 프로젝트 구조
 ```
