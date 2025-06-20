@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"banksalad-backend-task/internal/domain"
 )
 
@@ -16,17 +19,15 @@ func setupTestDir(t *testing.T) string {
 
 	// 임시 디렉토리 생성
 	tmpDir := filepath.Join(os.TempDir(), fmt.Sprintf("banksalad_test_%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(filepath.Join(tmpDir, "files", "output"), 0755); err != nil {
-		t.Fatalf("테스트 디렉토리 생성 실패: %v", err)
-	}
+	err := os.MkdirAll(filepath.Join(tmpDir, "files", "output"), 0755)
+	require.NoError(t, err, "테스트 디렉토리 생성 실패")
 
 	// 원래 작업 디렉토리 저장
 	originalWd, _ := os.Getwd()
 
 	// 임시 디렉토리로 이동
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("작업 디렉토리 변경 실패: %v", err)
-	}
+	err = os.Chdir(tmpDir)
+	require.NoError(t, err, "작업 디렉토리 변경 실패")
 
 	// 테스트 완료 후 정리
 	t.Cleanup(func() {
@@ -92,17 +93,14 @@ func TestRateLimiter_Wait(t *testing.T) {
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			// When: 토큰 요청
+			// When & Then: 토큰 요청 및 검증
 			for i := 0; i < tc.waitCount; i++ {
 				err := rateLimiter.Wait(ctx)
 
-				// Then: 결과 검증
-				if tc.expectError && err == nil {
-					t.Error("에러가 예상되었지만 발생하지 않음")
-				}
-
-				if !tc.expectError && err != nil {
-					t.Errorf("예상치 못한 에러: %v", err)
+				if tc.expectError {
+					assert.Error(t, err)
+				} else {
+					assert.NoError(t, err)
 				}
 			}
 		})
@@ -148,20 +146,15 @@ func TestEmailService_SendEmails_Unit(t *testing.T) {
 			successCount, err := emailService.SendEmails(ctx, tc.users)
 
 			// Then: 결과 검증
-			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-				// 컨텍스트 에러가 아닌 경우만 실패로 간주하지 않음
-				// 개별 전송 실패는 에러를 반환하지 않음
+			// 컨텍스트 에러가 아닌 경우는 개별 전송 실패로 에러를 반환하지 않음
+			if err != nil {
+				assert.True(t, err == context.Canceled || err == context.DeadlineExceeded)
 			}
 
-			if successCount != tc.expectedSuccess {
-				t.Errorf("성공 수 불일치: 예상=%d, 실제=%d", tc.expectedSuccess, successCount)
-			}
+			assert.Equal(t, tc.expectedSuccess, successCount)
 
-			if !tc.shouldFail {
-				expectedCount := len(tc.users)
-				if len(mockClient.sentEmails) != expectedCount {
-					t.Errorf("전송된 이메일 수 불일치: 예상=%d, 실제=%d", expectedCount, len(mockClient.sentEmails))
-				}
+			if !tc.shouldFail && len(tc.users) > 0 {
+				assert.Len(t, mockClient.sentEmails, len(tc.users))
 			}
 		})
 	}
@@ -172,19 +165,16 @@ func TestEmailService_SendEmails_Integration(t *testing.T) {
 	setupTestDir(t)
 
 	testCases := []struct {
-		name            string
-		users           []*domain.User
-		expectedSuccess int
+		name  string
+		users []*domain.User
 	}{
 		{
-			name:            "빈 사용자 목록",
-			users:           nil,
-			expectedSuccess: 0,
+			name:  "빈 사용자 목록",
+			users: nil,
 		},
 		{
-			name:            "정상적인 이메일 전송",
-			users:           createTestUsers(3),
-			expectedSuccess: 3, // 0.5% 에러율로 인해 일부 실패할 수 있음
+			name:  "정상적인 이메일 전송",
+			users: createTestUsers(3),
 		},
 	}
 
@@ -199,18 +189,16 @@ func TestEmailService_SendEmails_Integration(t *testing.T) {
 			successCount, err := emailService.SendEmails(ctx, tc.users)
 
 			// Then: 결과 검증
-			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-				t.Errorf("예상치 못한 에러: %v", err)
+			if err != nil {
+				assert.True(t, err == context.Canceled || err == context.DeadlineExceeded)
 			}
 
-			// 0.5% 에러율로 인해 정확히 일치하지 않을 수 있음
-			if len(tc.users) > 0 && successCount == 0 {
-				t.Error("모든 이메일 전송이 실패함")
+			// 0.5% 에러율로 인해 일부 실패할 수 있음
+			if len(tc.users) > 0 {
+				assert.Greater(t, successCount, 0, "모든 이메일 전송이 실패함")
 			}
 
-			if successCount > len(tc.users) {
-				t.Errorf("성공 수가 총 사용자 수보다 많음: 성공=%d, 총=%d", successCount, len(tc.users))
-			}
+			assert.LessOrEqual(t, successCount, len(tc.users))
 		})
 	}
 }
@@ -257,20 +245,14 @@ func TestSMSService_SendSMS_Unit(t *testing.T) {
 			successCount, err := smsService.SendSMS(ctx, tc.users)
 
 			// Then: 결과 검증
-			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-				// 컨텍스트 에러가 아닌 경우만 실패로 간주하지 않음
-				// 개별 전송 실패는 에러를 반환하지 않음
+			if err != nil {
+				assert.True(t, err == context.Canceled || err == context.DeadlineExceeded)
 			}
 
-			if successCount != tc.expectedSuccess {
-				t.Errorf("성공 수 불일치: 예상=%d, 실제=%d", tc.expectedSuccess, successCount)
-			}
+			assert.Equal(t, tc.expectedSuccess, successCount)
 
-			if !tc.shouldFail {
-				expectedCount := len(tc.users)
-				if len(mockClient.sentSMS) != expectedCount {
-					t.Errorf("전송된 SMS 수 불일치: 예상=%d, 실제=%d", expectedCount, len(mockClient.sentSMS))
-				}
+			if !tc.shouldFail && len(tc.users) > 0 {
+				assert.Len(t, mockClient.sentSMS, len(tc.users))
 			}
 		})
 	}
@@ -308,18 +290,16 @@ func TestSMSService_SendSMS_Integration(t *testing.T) {
 			successCount, err := smsService.SendSMS(ctx, tc.users)
 
 			// Then: 결과 검증
-			if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-				t.Errorf("예상치 못한 에러: %v", err)
+			if err != nil {
+				assert.True(t, err == context.Canceled || err == context.DeadlineExceeded)
 			}
 
 			// 0.5% 에러율로 인해 일부 실패할 수 있음
-			if len(tc.users) > 0 && successCount == 0 {
-				t.Error("모든 SMS 전송이 실패함")
+			if len(tc.users) > 0 {
+				assert.Greater(t, successCount, 0, "모든 SMS 전송이 실패함")
 			}
 
-			if successCount > len(tc.users) {
-				t.Errorf("성공 수가 총 사용자 수보다 많음: 성공=%d, 총=%d", successCount, len(tc.users))
-			}
+			assert.LessOrEqual(t, successCount, len(tc.users))
 		})
 	}
 }
@@ -337,25 +317,95 @@ func TestNotificationManager_SendNotifications_Integration(t *testing.T) {
 	emailSuccess, smsSuccess, err := manager.SendNotifications(ctx, users)
 
 	// Then: 결과 검증
-	if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
-		t.Errorf("예상치 못한 에러: %v", err)
+	if err != nil {
+		assert.True(t, err == context.Canceled || err == context.DeadlineExceeded)
 	}
 
 	// 0.5% 에러율로 인해 일부 실패할 수 있지만, 모든 전송이 실패하면 안 됨
-	if len(users) > 0 && emailSuccess == 0 {
-		t.Error("모든 이메일 전송이 실패함")
+	if len(users) > 0 {
+		assert.Greater(t, emailSuccess, 0, "모든 이메일 전송이 실패함")
+		assert.Greater(t, smsSuccess, 0, "모든 SMS 전송이 실패함")
 	}
 
-	if len(users) > 0 && smsSuccess == 0 {
-		t.Error("모든 SMS 전송이 실패함")
+	assert.LessOrEqual(t, emailSuccess, len(users))
+	assert.LessOrEqual(t, smsSuccess, len(users))
+}
+
+func TestNotificationManager_SendNotifications_Unit(t *testing.T) {
+	testCases := []struct {
+		name            string
+		users           []*domain.User
+		emailShouldFail bool
+		smsShouldFail   bool
+		expectError     bool
+	}{
+		{
+			name:            "빈 사용자 목록",
+			users:           nil,
+			emailShouldFail: false,
+			smsShouldFail:   false,
+			expectError:     false,
+		},
+		{
+			name:            "정상적인 알림 전송",
+			users:           createTestUsers(2),
+			emailShouldFail: false,
+			smsShouldFail:   false,
+			expectError:     false,
+		},
+		{
+			name:            "이메일 실패, SMS 성공",
+			users:           createTestUsers(2),
+			emailShouldFail: true,
+			smsShouldFail:   false,
+			expectError:     false, // 개별 실패는 에러로 반환하지 않음
+		},
 	}
 
-	if emailSuccess > len(users) {
-		t.Errorf("이메일 성공 수가 총 사용자 수보다 많음: 성공=%d, 총=%d", emailSuccess, len(users))
-	}
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Given: Mock 서비스들을 사용한 알림 매니저 생성
+			mockEmailClient := &MockEmailClient{shouldFail: tc.emailShouldFail}
+			mockSMSClient := &MockSMSClient{shouldFail: tc.smsShouldFail}
 
-	if smsSuccess > len(users) {
-		t.Errorf("SMS 성공 수가 총 사용자 수보다 많음: 성공=%d, 총=%d", smsSuccess, len(users))
+			emailService := NewEmailServiceWithClient(mockEmailClient)
+			smsService := NewSMSServiceWithClient(mockSMSClient)
+
+			manager := &NotificationManager{
+				emailService: emailService,
+				smsService:   smsService,
+			}
+
+			t.Cleanup(func() {
+				manager.Close()
+			})
+
+			ctx := context.Background()
+
+			// When: 알림 전송 실행
+			emailSuccess, smsSuccess, err := manager.SendNotifications(ctx, tc.users)
+
+			// Then: 결과 검증
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			// 성공 수 검증
+			expectedEmailSuccess := 0
+			expectedSMSSuccess := 0
+			if !tc.emailShouldFail {
+				expectedEmailSuccess = len(tc.users)
+			}
+			if !tc.smsShouldFail {
+				expectedSMSSuccess = len(tc.users)
+			}
+
+			assert.Equal(t, expectedEmailSuccess, emailSuccess)
+			assert.Equal(t, expectedSMSSuccess, smsSuccess)
+		})
 	}
 }
 

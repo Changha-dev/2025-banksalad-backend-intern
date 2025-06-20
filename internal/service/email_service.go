@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"log"
 	"sync"
 	"sync/atomic"
+
+	log "github.com/sirupsen/logrus"
 
 	"banksalad-backend-task/clients"
 	"banksalad-backend-task/internal/domain"
@@ -49,6 +50,12 @@ func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) (i
 		wg.Add(1)
 		go func(u *domain.User) {
 			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					log.WithField("panic", r).Error("recovered from panic")
+					atomic.AddInt64(&failureCount, 1)
+				}
+			}()
 
 			select {
 			case <-ctx.Done():
@@ -56,7 +63,7 @@ func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) (i
 				return
 			default:
 				if err := es.client.Send(u.Email, "신용점수 상승 알림"); err != nil {
-					log.Printf("이메일 전송 실패 (계속 진행): %s - %v", u.Email, err)
+					log.WithError(err).WithField("email", u.Email).Error("이메일 전송 실패 (계속 진행)")
 					atomic.AddInt64(&failureCount, 1)
 				} else {
 					atomic.AddInt64(&successCount, 1)
@@ -75,6 +82,11 @@ func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) (i
 		}
 	}
 
-	log.Printf("✓ 이메일 전송 완료: %d/%d명 성공, %d명 실패", successCount, len(users), failureCount)
+	log.WithFields(log.Fields{
+		"success": successCount,
+		"total":   len(users),
+		"failure": failureCount,
+	}).Info("이메일 전송 완료")
+
 	return int(successCount), nil
 }

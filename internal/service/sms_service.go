@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
-	"log"
 	"time"
+
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 
 	"banksalad-backend-task/clients"
 	"banksalad-backend-task/internal/domain"
@@ -57,12 +58,12 @@ func (ss *smsService) SendSMS(ctx context.Context, users []*domain.User) (int, e
 		default:
 			// 속도 제한 대기
 			if err := ss.rateLimiter.Wait(ctx); err != nil {
-				return successCount, fmt.Errorf("속도 제한 대기 중 오류: %w", err)
+				return successCount, errors.Wrap(err, "속도 제한 대기 중 오류")
 			}
 
 			if err := ss.client.Send(user.PhoneNumber, "신용점수 상승 알림"); err != nil {
 				// 에러를 로그로 기록하고 계속 진행
-				log.Printf("SMS 전송 실패 (계속 진행): %s - %v", user.PhoneNumber, err)
+				log.WithError(err).WithField("phoneNumber", user.PhoneNumber).Error("SMS 전송 실패 (계속 진행)")
 				failureCount++
 			} else {
 				successCount++
@@ -70,7 +71,12 @@ func (ss *smsService) SendSMS(ctx context.Context, users []*domain.User) (int, e
 		}
 	}
 
-	log.Printf("✓ SMS 전송 완료: %d/%d명 성공, %d명 실패", successCount, len(users), failureCount)
+	log.WithFields(log.Fields{
+		"success": successCount,
+		"total":   len(users),
+		"failure": failureCount,
+	}).Info("SMS 전송 완료")
+
 	return successCount, nil
 }
 
