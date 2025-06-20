@@ -2,8 +2,9 @@ package service
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"sync"
+	"sync/atomic"
 
 	"banksalad-backend-task/clients"
 	"banksalad-backend-task/internal/domain"
@@ -14,11 +15,11 @@ type EmailSender interface {
 }
 
 type EmailService interface {
-	SendEmails(ctx context.Context, users []*domain.User) error
+	SendEmails(ctx context.Context, users []*domain.User) (int, error)
 }
 
 type emailService struct {
-	client EmailSender // 인터페이스 타입으로 변경
+	client EmailSender
 }
 
 func NewEmailService() EmailService {
@@ -34,13 +35,15 @@ func NewEmailServiceWithClient(client EmailSender) EmailService {
 	}
 }
 
-func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) error {
+func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) (int, error) {
 	if len(users) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(users))
+	successCount := int64(0)
+	failureCount := int64(0)
 
 	for _, user := range users {
 		wg.Add(1)
@@ -53,7 +56,10 @@ func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) er
 				return
 			default:
 				if err := es.client.Send(u.Email, "신용점수 상승 알림"); err != nil {
-					errChan <- fmt.Errorf("이메일 전송 실패 %s: %w", u.Email, err)
+					log.Printf("이메일 전송 실패 (계속 진행): %s - %v", u.Email, err)
+					atomic.AddInt64(&failureCount, 1)
+				} else {
+					atomic.AddInt64(&successCount, 1)
 				}
 			}
 		}(user)
@@ -62,11 +68,13 @@ func (es *emailService) SendEmails(ctx context.Context, users []*domain.User) er
 	wg.Wait()
 	close(errChan)
 
+	// 컨텍스트 취소 에러만 반환, 개별 전송 실패는 무시
 	for err := range errChan {
-		if err != nil {
-			return err
+		if err == context.Canceled || err == context.DeadlineExceeded {
+			return int(successCount), err
 		}
 	}
 
-	return nil
+	log.Printf("✓ 이메일 전송 완료: %d/%d명 성공, %d명 실패", successCount, len(users), failureCount)
+	return int(successCount), nil
 }
