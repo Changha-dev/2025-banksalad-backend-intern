@@ -80,7 +80,7 @@ func main() {
 		fmt.Printf("✓ 알림 전송 완료: 이메일 %d명, SMS %d명, 양쪽 모두 성공 %d명\n\n",
 			emailSuccess, smsSuccess, bothSuccess)
 	} else {
-		fmt.Println("알림을 보낼 사용자가 없습니다.\n")
+		fmt.Println("알림을 보낼 사용자가 없습니다.")
 	}
 
 	// 결과 요약
