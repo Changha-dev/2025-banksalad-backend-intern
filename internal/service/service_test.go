@@ -111,28 +111,28 @@ func TestRateLimiter_Wait(t *testing.T) {
 
 func TestEmailService_SendEmails_Unit(t *testing.T) {
 	testCases := []struct {
-		name        string
-		users       []*domain.User
-		shouldFail  bool
-		expectError bool
+		name            string
+		users           []*domain.User
+		shouldFail      bool
+		expectedSuccess int
 	}{
 		{
-			name:        "빈 사용자 목록",
-			users:       nil,
-			shouldFail:  false,
-			expectError: false,
+			name:            "빈 사용자 목록",
+			users:           nil,
+			shouldFail:      false,
+			expectedSuccess: 0,
 		},
 		{
-			name:        "정상적인 이메일 전송",
-			users:       createTestUsers(3),
-			shouldFail:  false,
-			expectError: false,
+			name:            "정상적인 이메일 전송",
+			users:           createTestUsers(3),
+			shouldFail:      false,
+			expectedSuccess: 3,
 		},
 		{
-			name:        "이메일 전송 실패",
-			users:       createTestUsers(2),
-			shouldFail:  true,
-			expectError: true,
+			name:            "이메일 전송 실패",
+			users:           createTestUsers(2),
+			shouldFail:      true,
+			expectedSuccess: 0, // 모든 전송이 실패
 		},
 	}
 
@@ -141,11 +141,11 @@ func TestEmailService_SendEmails_Unit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Given: Mock 클라이언트를 사용한 이메일 서비스 생성
 			mockClient := &MockEmailClient{shouldFail: tc.shouldFail}
-			emailService := NewEmailServiceWithClient(mockClient) // 수정된 부분
+			emailService := NewEmailServiceWithClient(mockClient)
 			ctx := context.Background()
 
 			// When: 이메일 전송 실행
-			err := emailService.SendEmails(ctx, tc.users)
+			successCount, err := emailService.SendEmails(ctx, tc.users)
 
 			// Then: 결과 검증
 			if tc.expectError && err == nil {
@@ -171,19 +171,19 @@ func TestEmailService_SendEmails_Integration(t *testing.T) {
 	setupTestDir(t)
 
 	testCases := []struct {
-		name        string
-		users       []*domain.User
-		expectError bool
+		name            string
+		users           []*domain.User
+		expectedSuccess int
 	}{
 		{
-			name:        "빈 사용자 목록",
-			users:       nil,
-			expectError: false,
+			name:            "빈 사용자 목록",
+			users:           nil,
+			expectedSuccess: 0,
 		},
 		{
-			name:        "정상적인 이메일 전송",
-			users:       createTestUsers(3),
-			expectError: false,
+			name:            "정상적인 이메일 전송",
+			users:           createTestUsers(3),
+			expectedSuccess: 3, // 0.5% 에러율로 인해 일부 실패할 수 있음
 		},
 	}
 
@@ -195,7 +195,7 @@ func TestEmailService_SendEmails_Integration(t *testing.T) {
 			ctx := context.Background()
 
 			// When: 이메일 전송 실행
-			err := emailService.SendEmails(ctx, tc.users)
+			successCount, err := emailService.SendEmails(ctx, tc.users)
 
 			// Then: 결과 검증
 			if tc.expectError && err == nil {
@@ -211,28 +211,28 @@ func TestEmailService_SendEmails_Integration(t *testing.T) {
 
 func TestSMSService_SendSMS_Unit(t *testing.T) {
 	testCases := []struct {
-		name        string
-		users       []*domain.User
-		shouldFail  bool
-		expectError bool
+		name            string
+		users           []*domain.User
+		shouldFail      bool
+		expectedSuccess int
 	}{
 		{
-			name:        "빈 사용자 목록",
-			users:       nil,
-			shouldFail:  false,
-			expectError: false,
+			name:            "빈 사용자 목록",
+			users:           nil,
+			shouldFail:      false,
+			expectedSuccess: 0,
 		},
 		{
-			name:        "정상적인 SMS 전송",
-			users:       createTestUsers(2),
-			shouldFail:  false,
-			expectError: false,
+			name:            "정상적인 SMS 전송",
+			users:           createTestUsers(2),
+			shouldFail:      false,
+			expectedSuccess: 2,
 		},
 		{
-			name:        "SMS 전송 실패",
-			users:       createTestUsers(1),
-			shouldFail:  true,
-			expectError: true,
+			name:            "SMS 전송 실패",
+			users:           createTestUsers(1),
+			shouldFail:      true,
+			expectedSuccess: 0, // 모든 전송이 실패
 		},
 	}
 
@@ -241,14 +241,14 @@ func TestSMSService_SendSMS_Unit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Given: Mock 클라이언트를 사용한 SMS 서비스 생성
 			mockClient := &MockSMSClient{shouldFail: tc.shouldFail}
-			smsService := NewSMSServiceWithClient(mockClient) // 수정된 부분
+			smsService := NewSMSServiceWithClient(mockClient)
 			t.Cleanup(func() {
 				smsService.Stop()
 			})
 			ctx := context.Background()
 
 			// When: SMS 전송 실행
-			err := smsService.SendSMS(ctx, tc.users)
+			successCount, err := smsService.SendSMS(ctx, tc.users)
 
 			// Then: 결과 검증
 			if tc.expectError && err == nil {
@@ -274,19 +274,16 @@ func TestSMSService_SendSMS_Integration(t *testing.T) {
 	setupTestDir(t)
 
 	testCases := []struct {
-		name        string
-		users       []*domain.User
-		expectError bool
+		name  string
+		users []*domain.User
 	}{
 		{
-			name:        "빈 사용자 목록",
-			users:       nil,
-			expectError: false,
+			name:  "빈 사용자 목록",
+			users: nil,
 		},
 		{
-			name:        "정상적인 SMS 전송",
-			users:       createTestUsers(2),
-			expectError: false,
+			name:  "정상적인 SMS 전송",
+			users: createTestUsers(2),
 		},
 	}
 
@@ -301,7 +298,7 @@ func TestSMSService_SendSMS_Integration(t *testing.T) {
 			ctx := context.Background()
 
 			// When: SMS 전송 실행
-			err := smsService.SendSMS(ctx, tc.users)
+			successCount, err := smsService.SendSMS(ctx, tc.users)
 
 			// Then: 결과 검증
 			if tc.expectError && err == nil {
@@ -325,7 +322,7 @@ func TestNotificationManager_SendNotifications_Integration(t *testing.T) {
 	ctx := context.Background()
 
 	// When: 알림 전송 실행
-	err := manager.SendNotifications(ctx, users)
+	emailSuccess, smsSuccess, err := manager.SendNotifications(ctx, users)
 
 	// Then: 결과 검증
 	if err != nil {
